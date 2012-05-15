@@ -1,6 +1,8 @@
 package info.liuqy.adc.happynewyear;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -94,93 +96,84 @@ public class HappyNewYearActivity extends Activity {
 		 * In this program, what we want to get are the <phone number, nickname,
 		 * note> data triplets. So let's go through the contacts.
 		 */
-		Cursor cur = getContentResolver().query(
+		Cursor cursorId = getContentResolver().query(
 				ContactsContract.Contacts.CONTENT_URI, null, null, null, null);
 
-		// attributes for the contact
-		Set<String> attrs = new HashSet<String>();
-		
-		while (cur.moveToNext()) {
-			String contactId = cur.getString(cur.getColumnIndex(Contacts._ID));
+        // 读取所有联系人ID(必须有电话号码)，加入到数组中
+        List<String> contactIdList = new ArrayList<String>();
+        while (cursorId.moveToNext()) {
+            // retrieve phone numbers
+            int phoneCount = cursorId.getInt(cursorId
+                    .getColumnIndex(Contacts.HAS_PHONE_NUMBER));
+            // only process contacts with phone numbers
+            if (phoneCount>0) {
+            contactIdList.add(cursorId.getString(cursorId.getColumnIndex(Contacts._ID)));
+            }
+        }
+        cursorId.close();
 
-			// retrieve phone numbers
-			int phoneCount = cur.getInt(cur
-					.getColumnIndex(Contacts.HAS_PHONE_NUMBER));
+        // 遍历联系人ID数组 读取每个联系人的信息
+        // attributes for the contact
+        Set<String> attrs = new HashSet<String>();
+        Bundle curSendList = new Bundle();
+        for(String contactId : contactIdList) {
+            attrs.clear();
+            curSendList.clear();
 
-			// only process contacts with phone numbers
-			if (phoneCount > 0) {
+            Cursor cursorInfo = getContentResolver().query(
+                    Data.CONTENT_URI, null, Data.CONTACT_ID + "=?",
+                    new String[] { contactId }, null);
 
-				Cursor nicknames = getContentResolver().query(
-						Data.CONTENT_URI,
-						new String[] { Data._ID, Nickname.NAME },
-						Data.CONTACT_ID + "=?" + " AND " + Data.MIMETYPE + "='"
-								+ Nickname.CONTENT_ITEM_TYPE + "'",
-						new String[] { contactId }, null);
+            // only process contacts with nickname (the first one)
+            if (cursorInfo.moveToFirst()) {
+                String nickname = cursorInfo.getString(cursorInfo
+                        .getColumnIndex(Nickname.NAME));
 
-				// only process contacts with nickname (the first one)
-				if (nicknames.moveToFirst()) {
-					String nickname = nicknames.getString(nicknames  
-                            .getColumnIndex(Nickname.NAME));
-					
-					Cursor notes = getContentResolver().query(  
-	                        Data.CONTENT_URI,  
-	                        new String[] { Data._ID, Note.NOTE },  
-	                        Data.CONTACT_ID + "=?" + " AND " + Data.MIMETYPE + "='"  
-	                                + Note.CONTENT_ITEM_TYPE + "'",  
-	                        new String[] { contactId }, null);
-					
-					// retrieve all attributes from all notes
-					attrs.clear();
-					while (notes.moveToNext()) {
-						String noteinfo = notes.getString(notes  
+                do {
+                    String type = cursorInfo.getString(
+                            cursorInfo.getColumnIndex(ContactsContract.Data.MIMETYPE));
+
+                    if (type.equals(Nickname.CONTENT_ITEM_TYPE)){
+                        nickname = cursorInfo.getString(cursorInfo
+                                .getColumnIndex(Nickname.NAME));
+                    }else if(type.equals(Note.CONTENT_ITEM_TYPE)){
+                        String noteInfo = cursorInfo.getString(cursorInfo
                                 .getColumnIndex(Note.NOTE));
-						String[] fragments = noteinfo.toUpperCase().split(","); //FIXME better regex?
-						for (String attr : fragments) {
-							attrs.add(attr);
-						}
-					}
-					
-					notes.close();
-					
-					//set defaults
-					if (!attrs.contains(Market.NORTH.toString())
-							&& !attrs.contains(Market.SOUTH.toString()))
-						attrs.add(Market.NORTH.toString());
-					
-					if (!attrs.contains(Language.CHINESE.toString())
-							&& !attrs.contains(Language.ENGLISH.toString()))
-						attrs.add(Language.CHINESE.toString());
-					
-					// only process contacts with the matching market & language
-					if (attrs.contains("ADC") //FIXME for class demo only
-							&& (market.equals(Market.ANY) || attrs.contains(market.toString())) 
-							&& (lang.equals(Language.ANY) || attrs.contains(lang.toString()))) {
-						
-						Cursor phones = getContentResolver().query(
-								ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-								null, Phone.CONTACT_ID + "=" + contactId, null, null);
+                        String[] fragments = noteInfo.toUpperCase().split(","); //FIXME better regex?
+                        for (String attr : fragments) {
+                            attrs.add(attr);
+                        }
+                    }else if(type.equals(Phone.CONTENT_ITEM_TYPE)){
+                        String phoneNumber = cursorInfo.getString(cursorInfo
+                                .getColumnIndex(Phone.NUMBER));
+                        phoneNumber = phoneNumber.replaceAll("-","");
+                        int phoneType = cursorInfo.getInt(cursorInfo
+                                .getColumnIndex(Phone.TYPE));
 
-						// process all phone numbers
-						while (phones.moveToNext()) {
-							String phoneNumber = phones.getString(phones
-									.getColumnIndex(Phone.NUMBER));
-							int phoneType = phones.getInt(phones
-									.getColumnIndex(Phone.TYPE));
-							
-							if (isMobile(phoneNumber, phoneType)) {
-								sendlist.putString(phoneNumber, nickname);
-							}
-						}
-						
-						phones.close();
-					}
-				}
-				
-				nicknames.close();
-			}
-		}
-		
-		cur.close();
+                        if (isMobile(phoneNumber, phoneType)) {
+                            curSendList.putString(phoneNumber, nickname);
+                        }
+                    }
+
+                } while(cursorInfo.moveToNext());
+
+                //set defaults
+                if (!attrs.contains(Market.NORTH.toString())
+                        && !attrs.contains(Market.SOUTH.toString()))
+                    attrs.add(Market.NORTH.toString());
+
+                if (!attrs.contains(Language.CHINESE.toString())
+                        && !attrs.contains(Language.ENGLISH.toString()))
+                    attrs.add(Language.CHINESE.toString());
+
+                // only process contacts with the matching market & language
+                if (attrs.contains("ADC") //FIXME for class demo only
+                        && (market.equals(Market.ANY) || attrs.contains(market.toString()))
+                        && (lang.equals(Language.ANY) || attrs.contains(lang.toString()))) {
+                    sendlist.putAll(curSendList);
+                }
+            }
+        }
 
 		return sendlist;
 	}

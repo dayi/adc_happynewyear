@@ -19,6 +19,8 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.telephony.SmsManager;
 import android.view.View;
 import android.widget.SimpleAdapter;
@@ -54,6 +56,22 @@ public class SendListActivity extends ListActivity {
     
     SQLiteOpenHelper dbHelper = null;
     SQLiteDatabase db = null;
+
+    protected static final int SMS_SEND_START  = 0x101;
+    protected static final int SMS_SEND_FINISH = 0x102;
+    Handler sendSmsHandler = new Handler() {
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case SendListActivity.SMS_SEND_START:
+                    findViewById(R.id.send).setEnabled(false);
+                    break;
+                case SendListActivity.SMS_SEND_FINISH:
+                    findViewById(R.id.send).setEnabled(true);
+                    break;
+            }
+            super.handleMessage(msg);
+        }
+    };
 
 	@Override
     public void onCreate(Bundle savedInstanceState) {
@@ -96,39 +114,61 @@ public class SendListActivity extends ListActivity {
 
 	}
 
-	public void sendSms(View v) {
-        SmsManager sender = SmsManager.getDefault();
-        if (sender == null) {
-            // TODO toast error msg
+    class sendSmsThread implements Runnable {
+        public void run() {
+
+            Message message = new Message();
+            message.what = SendListActivity.SMS_SEND_START;
+
+            SendListActivity.this.sendSmsHandler.sendMessage(message);
+            try {
+                SmsManager sender = SmsManager.getDefault();
+                if (sender == null) {
+                    // TODO toast error msg
+                    Toast.makeText(SendListActivity.this,
+                            "can't get SmsManager!", Toast.LENGTH_SHORT)
+                            .show();
+                }
+
+                for (int idx = 0; idx < smslist.size(); idx++) {
+                    Map<String, String> rec = smslist.get(idx);
+                    String toNumber = rec.get(KEY_TO);
+                    String sms = rec.get(KEY_SMS);
+
+                    // SMS sent pending intent
+                    Intent sentActionIntent = new Intent(SENT_ACTION);
+                    sentActionIntent.putExtra(EXTRA_IDX, idx);
+                    sentActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
+                    sentActionIntent.putExtra(EXTRA_SMS, sms);
+                    PendingIntent sentPendingIntent = PendingIntent.getBroadcast(
+                            SendListActivity.this, 0, sentActionIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT);
+
+                    // SMS delivered pending intent
+                    Intent deliveredActionIntent = new Intent(DELIVERED_ACTION);
+                    deliveredActionIntent.putExtra(EXTRA_IDX, idx);
+                    deliveredActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
+                    deliveredActionIntent.putExtra(EXTRA_SMS, sms);
+                    PendingIntent deliveredPendingIntent = PendingIntent.getBroadcast(
+                            SendListActivity.this, 0, deliveredActionIntent,
+                            PendingIntent.FLAG_UPDATE_CURRENT);
+
+                    //send
+                    sender.sendTextMessage(toNumber, null, sms, sentPendingIntent,
+                            deliveredPendingIntent);
+                    Thread.sleep(5000);
+                }
+            } catch (InterruptedException e) {
+
+            }
+            message.what = SendListActivity.SMS_SEND_FINISH;
+
+            SendListActivity.this.sendSmsHandler.sendMessage(message);
         }
+    }
 
-        for (int idx = 0; idx < smslist.size(); idx++) {
-            Map<String, String> rec = smslist.get(idx);
-            String toNumber = rec.get(KEY_TO);
-            String sms = rec.get(KEY_SMS);
-
-            // SMS sent pending intent
-            Intent sentActionIntent = new Intent(SENT_ACTION);
-            sentActionIntent.putExtra(EXTRA_IDX, idx);
-            sentActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
-            sentActionIntent.putExtra(EXTRA_SMS, sms);
-            PendingIntent sentPendingIntent = PendingIntent.getBroadcast(
-                    this, 0, sentActionIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT);
-
-            // SMS delivered pending intent
-            Intent deliveredActionIntent = new Intent(DELIVERED_ACTION);
-            deliveredActionIntent.putExtra(EXTRA_IDX, idx);
-            deliveredActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
-            deliveredActionIntent.putExtra(EXTRA_SMS, sms);
-            PendingIntent deliveredPendingIntent = PendingIntent.getBroadcast(
-                    this, 0, deliveredActionIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT);
-
-            //send
-            sender.sendTextMessage(toNumber, null, sms, sentPendingIntent,
-                    deliveredPendingIntent);
-        }
+    public void sendSms(View v) {
+        new Thread(new sendSmsThread()).start();
     }
 
 	@Override
