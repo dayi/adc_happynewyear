@@ -32,6 +32,11 @@ public class SendListActivity extends ListActivity {
 	
     static final String KEY_TO = "TO";
     static final String KEY_SMS = "SMS";
+    static final String KEY_STATE = "STATE";
+
+    static final String SMS_STATE_NOT_SEND  = "0";
+    static final String SMS_STATE_SENDED    = "1";
+    static final String SMS_STATE_DELIVERED = "2";
 
     static final String SENT_ACTION = "SMS_SENT_ACTION";
     static final String DELIVERED_ACTION = "SMS_DELIVERED_ACTION";
@@ -47,6 +52,7 @@ public class SendListActivity extends ListActivity {
     private static final String TBL_NAME = "sms";
     static final String FIELD_TO = "to_number";
     static final String FIELD_SMS = "sms";
+    static final String FIELD_STATE = "state";
     static final String KEY_ROWID = "_id";
     
     //[<TO, number>,<SMS, sms>]
@@ -100,27 +106,35 @@ public class SendListActivity extends ListActivity {
 
     Handler sendSmsHandler = new Handler() {
         public void handleMessage(Message msg) {
+            int idx = -1;
             switch (msg.what) {
                 case SMSLIST_SEND_START:
                     findViewById(R.id.send).setEnabled(false);
-
+                    nSended = 0;
+                    showNotification();
                     break;
                 case SMSLIST_SEND_FINISH:
                     findViewById(R.id.send).setEnabled(true);
                     break;
 
                 case SMS_SEND_START:
-                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.blue(96));
+                    idx = msg.getData().getInt(EXTRA_IDX);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.BLUE);
+
                     break;
 
                 case SMS_SEND_SUCCESSED:
-                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.YELLOW);
+                    idx = msg.getData().getInt(EXTRA_IDX);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.YELLOW);
+                    smslist.get(idx).put(KEY_STATE, SMS_STATE_SENDED);
                     nSended++;
                     updateNotification();
                     break;
 
                 case SMS_SEND_DELIVERED:
-                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.red(96));
+                    idx = msg.getData().getInt(EXTRA_IDX);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.RED);
+                    smslist.get(idx).put(KEY_STATE, SMS_STATE_DELIVERED);
                     break;
 
             }
@@ -143,8 +157,29 @@ public class SendListActivity extends ListActivity {
         this.setListAdapter(adapter);
         handleIntent();
         
-        if (smslist.size() == 0)  //FIXME need a better judge if from notification
+        if (smslist.size() == 0) {  //FIXME need a better judge if from notification
             loadFromDatabase();
+        } else {
+            updateListItemState();
+        }
+    }
+
+    private void updateListItemState(){
+        Cursor cur = db.query(TBL_NAME, new String[]{KEY_ROWID, FIELD_TO, FIELD_SMS, FIELD_STATE},
+                null, null, null, null, null);
+
+        while (cur.moveToNext()) {
+            String toNumber = cur.getString(cur.getColumnIndex(FIELD_TO));
+            String sms = cur.getString(cur.getColumnIndex(FIELD_SMS));
+            String state = cur.getString(cur.getColumnIndex(FIELD_STATE));
+            for(Map<String, String> rec:smslist){
+                if (rec.get(KEY_TO).equals(toNumber)){
+                    rec.put(KEY_STATE, state);
+                }
+            }
+        }
+
+        cur.close();
     }
 	
 	public void handleIntent() {
@@ -162,11 +197,12 @@ public class SendListActivity extends ListActivity {
                 Map<String, String> rec = new Hashtable<String, String>();
                 rec.put(KEY_TO, n);
                 rec.put(KEY_SMS, sms);
+                rec.put(KEY_STATE, SMS_STATE_NOT_SEND);
                 smslist.add(rec);
                 adapter.notifyDataSetChanged();
+                saveToDatabase(sendlist.getString(n), sms);
             }
         }
-
 	}
 
     class sendSmsThread implements Runnable {
@@ -189,36 +225,49 @@ public class SendListActivity extends ListActivity {
                     Map<String, String> rec = smslist.get(idx);
                     String toNumber = rec.get(KEY_TO);
                     String sms = rec.get(KEY_SMS);
+                    String state = rec.get(KEY_STATE);
 
                     Bundle bundle = new Bundle();
                     bundle.putInt(EXTRA_IDX, idx);
                     bundle.putString(EXTRA_TONUMBER, toNumber);
                     bundle.putString(EXTRA_SMS, sms);
 
-                    // SMS sent pending intent
-                    Intent sentActionIntent = new Intent(SENT_ACTION);
-                    sentActionIntent.putExtras(bundle);
-                    PendingIntent sentPendingIntent = PendingIntent.getBroadcast(
-                            SendListActivity.this, 0, sentActionIntent,
-                            PendingIntent.FLAG_UPDATE_CURRENT);
+                    if (state.equals(SMS_STATE_NOT_SEND)){
+                        // SMS sent pending intent
+                        Intent sentActionIntent = new Intent(SENT_ACTION);
+                        sentActionIntent.putExtras(bundle);
+                        PendingIntent sentPendingIntent = PendingIntent.getBroadcast(
+                                SendListActivity.this, 0, sentActionIntent,
+                                PendingIntent.FLAG_UPDATE_CURRENT);
 
-                    // SMS delivered pending intent
-                    Intent deliveredActionIntent = new Intent(DELIVERED_ACTION);
-                    deliveredActionIntent.putExtras(bundle);
-                    PendingIntent deliveredPendingIntent = PendingIntent.getBroadcast(
-                            SendListActivity.this, 0, deliveredActionIntent,
-                            PendingIntent.FLAG_UPDATE_CURRENT);
+                        // SMS delivered pending intent
+                        Intent deliveredActionIntent = new Intent(DELIVERED_ACTION);
+                        deliveredActionIntent.putExtras(bundle);
+                        PendingIntent deliveredPendingIntent = PendingIntent.getBroadcast(
+                                SendListActivity.this, 0, deliveredActionIntent,
+                                PendingIntent.FLAG_UPDATE_CURRENT);
 
-                    //send
-                    Message msg = new Message();
-                    msg.what = SMS_SEND_START;
-                    msg.setData(bundle);
-                    SendListActivity.this.sendSmsHandler.sendMessage(msg);
-                    sender.sendTextMessage(toNumber, null, sms, sentPendingIntent,
-                            deliveredPendingIntent);
+                        //send
+                        Message msg = new Message();
+                        msg.what = SMS_SEND_START;
+                        msg.setData(bundle);
+                        SendListActivity.this.sendSmsHandler.sendMessage(msg);
+                        sender.sendTextMessage(toNumber, null, sms, sentPendingIntent,
+                                deliveredPendingIntent);
 
-                    if (idx<smslist.size()-1){
-                        Thread.sleep(5000);
+                        if (idx<smslist.size()-1){
+                            Thread.sleep(5000);
+                        }
+                    }else {
+                        Message msg = new Message();
+
+                        if(state.equals(SMS_STATE_SENDED)){
+                            msg.what = SMS_SEND_SUCCESSED;
+                        }else{
+                            msg.what = SMS_SEND_DELIVERED;
+                        }
+                        msg.setData(bundle);
+                        SendListActivity.this.sendSmsHandler.sendMessage(msg);
                     }
                 }
             } catch (InterruptedException e) {
@@ -232,9 +281,8 @@ public class SendListActivity extends ListActivity {
     }
 
     public void sendSms(View v) {
-        nSended = 0;
         new Thread(new sendSmsThread()).start();
-        showNotification();
+
     }
 
 	@Override
@@ -261,15 +309,11 @@ public class SendListActivity extends ListActivity {
 					String sms = intent.getStringExtra(EXTRA_SMS);
 					int succ = getResultCode();
 					if (succ == Activity.RESULT_OK) {
-                        /*
-						//  better notification
-						Toast.makeText(SendListActivity.this,
-								"Sent to " + toNum + " OK!", Toast.LENGTH_SHORT)
-								.show();
-								*/
                         Message msg = new Message();
                         msg.what = SMS_SEND_SUCCESSED;
                         msg.setData(intent.getExtras());
+                        sendSmsHandler.sendMessage(msg);
+                        updateSmsState(toNum, SMS_STATE_SENDED);
 					} else {
 						// TODO
 					}
@@ -285,13 +329,11 @@ public class SendListActivity extends ListActivity {
 					String sms = intent.getStringExtra(EXTRA_SMS);
 					int succ = getResultCode();
 					if (succ == Activity.RESULT_OK) {
-						// TODO better notification
-						//Toast.makeText(SendListActivity.this, "Delivered to " + toNum + " OK!", Toast.LENGTH_SHORT).show();
-						saveToDatabase(toNum, sms);
-						//notifySuccessfulDelivery("Delivered to " + toNum + " OK!", sms);
                         Message msg = new Message();
                         msg.what = SMS_SEND_DELIVERED;
                         msg.setData(intent.getExtras());
+                        sendSmsHandler.sendMessage(msg);
+                        updateSmsState(toNum, SMS_STATE_DELIVERED);
 					} else {
 						// TODO
 					}
@@ -338,7 +380,7 @@ public class SendListActivity extends ListActivity {
             @Override
             public void onCreate(SQLiteDatabase db) {
                 db.execSQL("create table sms (_id integer primary key autoincrement, " +
-                        "to_number text not null, sms text not null)");
+                        "to_number text not null, sms text not null, state text not null )");
             }
             @Override
             public void onUpgrade(SQLiteDatabase db, int oldVer, int newVer) {
@@ -351,15 +393,17 @@ public class SendListActivity extends ListActivity {
     }
     
     protected void loadFromDatabase() {
-        Cursor cur = db.query(TBL_NAME, new String[]{KEY_ROWID, FIELD_TO, FIELD_SMS},
+        Cursor cur = db.query(TBL_NAME, new String[]{KEY_ROWID, FIELD_TO, FIELD_SMS, FIELD_STATE},
                 null, null, null, null, null);
 
         while (cur.moveToNext()) {
             String toNumber = cur.getString(cur.getColumnIndex(FIELD_TO));
             String sms = cur.getString(cur.getColumnIndex(FIELD_SMS));
+            String state = cur.getString(cur.getColumnIndex(FIELD_STATE));
             Map<String, String> rec = new Hashtable<String, String>();
             rec.put(KEY_TO, toNumber);
             rec.put(KEY_SMS, sms);
+            rec.put(KEY_STATE, state);
             smslist.add(rec);
         }
         
@@ -370,9 +414,22 @@ public class SendListActivity extends ListActivity {
     
     protected void saveToDatabase(String toNum, String sms) {
         ContentValues values = new ContentValues();
-        values.put(FIELD_TO, "Successfully delivered to " + toNum); //FIXME string constant
+        values.put(FIELD_TO,  toNum); //FIXME string constant
         values.put(FIELD_SMS, sms);
-        db.insert(TBL_NAME, null, values);
+        values.put(FIELD_STATE,SMS_STATE_NOT_SEND);
+        Cursor cur = db.query(TBL_NAME, null, String.format("%s = ?", FIELD_TO), new String[]{toNum}, null, null, null);
+        if (cur.moveToFirst() == false){
+            cur.close();
+            db.insert(TBL_NAME, null, values);
+        }else{
+            cur.close();
+        }
+    }
+
+    protected void updateSmsState(String toNum, String state) {
+        ContentValues values = new ContentValues();
+        values.put(FIELD_STATE, state);
+        db.update(TBL_NAME, values, String.format("%s=?", FIELD_TO), new String[]{toNum});
     }
     
 }
