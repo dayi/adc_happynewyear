@@ -36,7 +36,6 @@ public class SendListActivity extends ListActivity {
 
     static final String SMS_STATE_NOT_SEND  = "0";
     static final String SMS_STATE_SENDED    = "1";
-    static final String SMS_STATE_DELIVERED = "2";
 
     static final String SENT_ACTION = "SMS_SENT_ACTION";
     static final String DELIVERED_ACTION = "SMS_DELIVERED_ACTION";
@@ -69,7 +68,9 @@ public class SendListActivity extends ListActivity {
     protected static final int SMSLIST_SEND_FINISH = 0x102;
     protected static final int SMS_SEND_START = 0x103;
     protected static final int SMS_SEND_SUCCESSED = 0x104;
+    protected static final int SMS_SEND_ERROR     = 0x105;
     protected static final int SMS_SEND_DELIVERED = 0x106;
+    protected static final int SMS_SEND_SENDED = 0x107;
 
     protected static final int NOTIFICATION_ID = 0x110;
 
@@ -119,13 +120,13 @@ public class SendListActivity extends ListActivity {
 
                 case SMS_SEND_START:
                     idx = msg.getData().getInt(EXTRA_IDX);
-                    getListView().getChildAt(idx).setBackgroundColor(Color.BLUE);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.rgb(0, 0, 96));
 
                     break;
 
                 case SMS_SEND_SUCCESSED:
                     idx = msg.getData().getInt(EXTRA_IDX);
-                    getListView().getChildAt(idx).setBackgroundColor(Color.YELLOW);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.rgb(0, 96, 96));
                     smslist.get(idx).put(KEY_STATE, SMS_STATE_SENDED);
                     nSended++;
                     updateNotification();
@@ -133,8 +134,19 @@ public class SendListActivity extends ListActivity {
 
                 case SMS_SEND_DELIVERED:
                     idx = msg.getData().getInt(EXTRA_IDX);
-                    getListView().getChildAt(idx).setBackgroundColor(Color.RED);
-                    smslist.get(idx).put(KEY_STATE, SMS_STATE_DELIVERED);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.rgb(0, 96, 0));
+                    break;
+
+                case SMS_SEND_SENDED:
+                    idx = msg.getData().getInt(EXTRA_IDX);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.rgb(48, 48, 48));
+                    nSended++;
+                    break;
+
+                case SMS_SEND_ERROR:
+                    idx = msg.getData().getInt(EXTRA_IDX);
+                    getListView().getChildAt(idx).setBackgroundColor(Color.rgb(96, 0, 0));
+                    nSended++;
                     break;
 
             }
@@ -261,11 +273,7 @@ public class SendListActivity extends ListActivity {
                     }else {
                         Message msg = new Message();
 
-                        if(state.equals(SMS_STATE_SENDED)){
-                            msg.what = SMS_SEND_SUCCESSED;
-                        }else{
-                            msg.what = SMS_SEND_DELIVERED;
-                        }
+                        msg.what = SMS_SEND_SENDED;
                         msg.setData(bundle);
                         SendListActivity.this.sendSmsHandler.sendMessage(msg);
                     }
@@ -308,16 +316,17 @@ public class SendListActivity extends ListActivity {
 					String toNum = intent.getStringExtra(EXTRA_TONUMBER);
 					String sms = intent.getStringExtra(EXTRA_SMS);
 					int succ = getResultCode();
-					if (succ == Activity.RESULT_OK) {
-                        Message msg = new Message();
+
+                    Message msg = new Message();
+                    if (succ == Activity.RESULT_OK) {
                         msg.what = SMS_SEND_SUCCESSED;
-                        msg.setData(intent.getExtras());
-                        sendSmsHandler.sendMessage(msg);
                         updateSmsState(toNum, SMS_STATE_SENDED);
 					} else {
 						// TODO
 					}
-				}
+                    msg.setData(intent.getExtras());
+                    sendSmsHandler.sendMessage(msg);
+                }
 			};
 
 		if (smsDeliveredReceiver == null)
@@ -333,7 +342,6 @@ public class SendListActivity extends ListActivity {
                         msg.what = SMS_SEND_DELIVERED;
                         msg.setData(intent.getExtras());
                         sendSmsHandler.sendMessage(msg);
-                        updateSmsState(toNum, SMS_STATE_DELIVERED);
 					} else {
 						// TODO
 					}
@@ -418,6 +426,7 @@ public class SendListActivity extends ListActivity {
         values.put(FIELD_SMS, sms);
         values.put(FIELD_STATE,SMS_STATE_NOT_SEND);
         Cursor cur = db.query(TBL_NAME, null, String.format("%s = ?", FIELD_TO), new String[]{toNum}, null, null, null);
+        // 判断是否存在相同接收号码
         if (cur.moveToFirst() == false){
             cur.close();
             db.insert(TBL_NAME, null, values);
