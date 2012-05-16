@@ -18,11 +18,13 @@ import android.content.IntentFilter;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.telephony.SmsManager;
 import android.view.View;
+import android.widget.RemoteViews;
 import android.widget.SimpleAdapter;
 import android.widget.Toast;
 
@@ -57,17 +59,70 @@ public class SendListActivity extends ListActivity {
     SQLiteOpenHelper dbHelper = null;
     SQLiteDatabase db = null;
 
-    protected static final int SMS_SEND_START  = 0x101;
-    protected static final int SMS_SEND_FINISH = 0x102;
+    protected static final int SMSLIST_SEND_START = 0x101;
+    protected static final int SMSLIST_SEND_FINISH = 0x102;
+    protected static final int SMS_SEND_START = 0x103;
+    protected static final int SMS_SEND_SUCCESSED = 0x104;
+    protected static final int SMS_SEND_DELIVERED = 0x106;
+
+    protected static final int NOTIFICATION_ID = 0x110;
+
+    private NotificationManager notificationManager;
+    private RemoteViews remoteViews;
+    private PendingIntent pIntent;
+    private Notification notification;
+
+    private Integer nSended = 0;
+
+    void showNotification(){
+
+        notificationManager = (NotificationManager)getSystemService(NOTIFICATION_SERVICE);
+        remoteViews = new RemoteViews(getPackageName(), R.layout.progressdlg);
+        notification = new Notification(R.drawable.ic_launcher, "a", System.currentTimeMillis());
+
+        notification.icon = R.drawable.ic_launcher;
+        remoteViews.setImageViewResource(R.id.image, R.drawable.ic_launcher);
+        remoteViews.setProgressBar(R.id.progressBar, smslist.size(), nSended, false);
+        remoteViews.setTextViewText(R.id.textView, nSended+"/"+smslist.size());
+        notification.contentView = remoteViews;
+
+        notification.contentIntent = PendingIntent.getActivity(this, 0,
+                new Intent(this, SendListActivity.class), 0);
+
+        notificationManager.notify(NOTIFICATION_ID, notification);
+    }
+
+    void updateNotification(){
+        remoteViews.setProgressBar(R.id.progressBar, smslist.size(), nSended, false);
+        remoteViews.setTextViewText(R.id.textView, nSended+"/"+smslist.size());
+        notificationManager.notify(NOTIFICATION_ID, notification);
+    }
+
     Handler sendSmsHandler = new Handler() {
         public void handleMessage(Message msg) {
             switch (msg.what) {
-                case SendListActivity.SMS_SEND_START:
+                case SMSLIST_SEND_START:
                     findViewById(R.id.send).setEnabled(false);
+
                     break;
-                case SendListActivity.SMS_SEND_FINISH:
+                case SMSLIST_SEND_FINISH:
                     findViewById(R.id.send).setEnabled(true);
                     break;
+
+                case SMS_SEND_START:
+                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.blue(96));
+                    break;
+
+                case SMS_SEND_SUCCESSED:
+                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.YELLOW);
+                    nSended++;
+                    updateNotification();
+                    break;
+
+                case SMS_SEND_DELIVERED:
+                    getListView().getChildAt(msg.getData().getInt(EXTRA_IDX)).setBackgroundColor(Color.red(96));
+                    break;
+
             }
             super.handleMessage(msg);
         }
@@ -118,7 +173,7 @@ public class SendListActivity extends ListActivity {
         public void run() {
 
             Message message = new Message();
-            message.what = SendListActivity.SMS_SEND_START;
+            message.what = SendListActivity.SMSLIST_SEND_START;
 
             SendListActivity.this.sendSmsHandler.sendMessage(message);
             try {
@@ -135,40 +190,51 @@ public class SendListActivity extends ListActivity {
                     String toNumber = rec.get(KEY_TO);
                     String sms = rec.get(KEY_SMS);
 
+                    Bundle bundle = new Bundle();
+                    bundle.putInt(EXTRA_IDX, idx);
+                    bundle.putString(EXTRA_TONUMBER, toNumber);
+                    bundle.putString(EXTRA_SMS, sms);
+
                     // SMS sent pending intent
                     Intent sentActionIntent = new Intent(SENT_ACTION);
-                    sentActionIntent.putExtra(EXTRA_IDX, idx);
-                    sentActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
-                    sentActionIntent.putExtra(EXTRA_SMS, sms);
+                    sentActionIntent.putExtras(bundle);
                     PendingIntent sentPendingIntent = PendingIntent.getBroadcast(
                             SendListActivity.this, 0, sentActionIntent,
                             PendingIntent.FLAG_UPDATE_CURRENT);
 
                     // SMS delivered pending intent
                     Intent deliveredActionIntent = new Intent(DELIVERED_ACTION);
-                    deliveredActionIntent.putExtra(EXTRA_IDX, idx);
-                    deliveredActionIntent.putExtra(EXTRA_TONUMBER, toNumber);
-                    deliveredActionIntent.putExtra(EXTRA_SMS, sms);
+                    deliveredActionIntent.putExtras(bundle);
                     PendingIntent deliveredPendingIntent = PendingIntent.getBroadcast(
                             SendListActivity.this, 0, deliveredActionIntent,
                             PendingIntent.FLAG_UPDATE_CURRENT);
 
                     //send
+                    Message msg = new Message();
+                    msg.what = SMS_SEND_START;
+                    msg.setData(bundle);
+                    SendListActivity.this.sendSmsHandler.sendMessage(msg);
                     sender.sendTextMessage(toNumber, null, sms, sentPendingIntent,
                             deliveredPendingIntent);
-                    Thread.sleep(5000);
+
+                    if (idx<smslist.size()-1){
+                        Thread.sleep(5000);
+                    }
                 }
             } catch (InterruptedException e) {
 
             }
-            message.what = SendListActivity.SMS_SEND_FINISH;
 
+            message = new Message();
+            message.what = SendListActivity.SMSLIST_SEND_FINISH;
             SendListActivity.this.sendSmsHandler.sendMessage(message);
         }
     }
 
     public void sendSms(View v) {
+        nSended = 0;
         new Thread(new sendSmsThread()).start();
+        showNotification();
     }
 
 	@Override
@@ -195,10 +261,15 @@ public class SendListActivity extends ListActivity {
 					String sms = intent.getStringExtra(EXTRA_SMS);
 					int succ = getResultCode();
 					if (succ == Activity.RESULT_OK) {
-						// TODO better notification
+                        /*
+						//  better notification
 						Toast.makeText(SendListActivity.this,
 								"Sent to " + toNum + " OK!", Toast.LENGTH_SHORT)
 								.show();
+								*/
+                        Message msg = new Message();
+                        msg.what = SMS_SEND_SUCCESSED;
+                        msg.setData(intent.getExtras());
 					} else {
 						// TODO
 					}
@@ -217,7 +288,10 @@ public class SendListActivity extends ListActivity {
 						// TODO better notification
 						//Toast.makeText(SendListActivity.this, "Delivered to " + toNum + " OK!", Toast.LENGTH_SHORT).show();
 						saveToDatabase(toNum, sms);
-						notifySuccessfulDelivery("Delivered to " + toNum + " OK!", sms);
+						//notifySuccessfulDelivery("Delivered to " + toNum + " OK!", sms);
+                        Message msg = new Message();
+                        msg.what = SMS_SEND_DELIVERED;
+                        msg.setData(intent.getExtras());
 					} else {
 						// TODO
 					}
