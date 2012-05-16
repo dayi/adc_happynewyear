@@ -322,7 +322,7 @@ public class SendListActivity extends ListActivity {
                         msg.what = SMS_SEND_SUCCESSED;
                         updateSmsState(toNum, SMS_STATE_SENDED);
 					} else {
-						// TODO
+						msg.what = SMS_SEND_ERROR;
 					}
                     msg.setData(intent.getExtras());
                     sendSmsHandler.sendMessage(msg);
@@ -337,14 +337,14 @@ public class SendListActivity extends ListActivity {
 					String toNum = intent.getStringExtra(EXTRA_TONUMBER);
 					String sms = intent.getStringExtra(EXTRA_SMS);
 					int succ = getResultCode();
-					if (succ == Activity.RESULT_OK) {
-                        Message msg = new Message();
+                    Message msg = new Message();
+                    if (succ == Activity.RESULT_OK) {
                         msg.what = SMS_SEND_DELIVERED;
-                        msg.setData(intent.getExtras());
-                        sendSmsHandler.sendMessage(msg);
-					} else {
-						// TODO
-					}
+                    } else {
+                        msg.what = SMS_SEND_ERROR;
+                    }
+                    msg.setData(intent.getExtras());
+                    sendSmsHandler.sendMessage(msg);
 				}
 			};
 	}
